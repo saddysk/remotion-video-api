@@ -7,7 +7,7 @@ curl -X POST http://localhost:3000/render-video \
   -d '{
     "durationInSeconds": 10,
     "videoSource": "/video.mp4",
-    "titleText": "[top] - text and positions working.",
+    "titleText": "[top] EXTERNAL AUDIO AT 25% VOLUME",
     "textPosition": "top",
     "enableAudio": true
   }'

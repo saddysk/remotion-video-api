@@ -11,7 +11,7 @@ export const AudioTrack = ({ audioFile, offsetInSeconds }) => {
     <Audio
       src={audioFile.startsWith("/public/") ? audioFile : staticFile(audioFile)}
       startFrom={offsetInFrames} // Start audio from specified offset in frames
-      volume={1}
+      volume={0.25} // Volume for external audio - 25%
     />
   );
 };

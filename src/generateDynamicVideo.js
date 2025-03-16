@@ -7,10 +7,11 @@ const path = require("path");
  * @param {string} options.titleText The title text to display
  * @param {string} options.textPosition The position of the text (top, center, bottom)
  * @param {string} options.videoSource Path to the video source
+ * @param {boolean} options.enableAudio Whether to enable additional audio alongside video
  * @returns {string} The path to the generated component
  */
 function generateDynamicVideo(options) {
-  const { titleText, textPosition, videoSource } = options;
+  const { titleText, textPosition, videoSource, enableAudio } = options;
 
   // Create a unique filename based on timestamp
   const timestamp = Date.now();
@@ -38,6 +39,7 @@ export const ${componentName} = (props) => {
   const videoSource = ${videoSource ? `"${videoSource}"` : "null"};
   const titleText = "${titleText.replace(/"/g, '\\"')}";
   const textPosition = "${textPosition}";
+  const enableAudio = ${enableAudio ? "true" : "false"};
   
   // Determine text position style
   const getTextPositionStyle = () => {
@@ -70,7 +72,7 @@ export const ${componentName} = (props) => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
-      {/* Background content */}
+      {/* Video or Image Background */}
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
         {useVideo ? (
           <RemotionVideo
@@ -119,13 +121,14 @@ export const ${componentName} = (props) => {
         </div>
       </div>
       
-      {/* Only add external audio if videoSource is not provided */}
-      {!useVideo && audioFile && (
+      {/* Audio handling - Either add external audio only if video is not available 
+          OR add it alongside video's audio if enableAudio is true */}
+      {(!useVideo && audioFile) || (enableAudio && audioFile) ? (
         <AudioTrack 
           audioFile={audioFile} 
-          offsetInSeconds={audioOffsetInSeconds} 
+          offsetInSeconds={audioOffsetInSeconds}
         />
-      )}
+      ) : null}
     </AbsoluteFill>
   );
 };

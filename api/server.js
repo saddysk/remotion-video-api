@@ -44,10 +44,12 @@ app.post("/render-video", async (req, res) => {
     const videoSource = req.body.videoSource;
     const titleText = req.body.titleText || "Default Title";
     const textPosition = req.body.textPosition || "bottom";
+    const enableAudio = req.body.enableAudio || false;
 
     // Log explicit values for debugging
     console.log("Extracted titleText:", titleText);
     console.log("Extracted textPosition:", textPosition);
+    console.log("Enable additional audio:", enableAudio);
 
     // Ensure paths are consistent
     const formattedAudioFile = audioFile.replace(/^\/public\//, "/");
@@ -67,6 +69,7 @@ app.post("/render-video", async (req, res) => {
       titleText,
       textPosition,
       videoSource: formattedVideoSource,
+      enableAudio,
     });
 
     console.log("Generated dynamic component:", componentName);
