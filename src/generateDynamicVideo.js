@@ -8,10 +8,21 @@ const path = require("path");
  * @param {string} options.textPosition The position of the text (top, center, bottom)
  * @param {string} options.videoSource Path to the video source
  * @param {boolean} options.enableAudio Whether to enable additional audio alongside video
- * @returns {string} The path to the generated component
+ * @param {boolean} options.splitScreen Whether to show two videos side by side
+ * @param {string} options.demoVideoSource Path to the right video (when splitScreen is true)
+ * @param {string} options.splitPosition Layout of the videos (left-right, right-left, top-bottom, bottom-top)
+ * @returns {Object} Information about the generated component
  */
 function generateDynamicVideo(options) {
-  const { titleText, textPosition, videoSource, enableAudio } = options;
+  const {
+    titleText,
+    textPosition,
+    videoSource,
+    enableAudio,
+    splitScreen = false,
+    demoVideoSource,
+    splitPosition,
+  } = options;
 
   // Create a unique filename based on timestamp
   const timestamp = Date.now();
@@ -23,6 +34,7 @@ function generateDynamicVideo(options) {
 import React from 'react';
 import { AbsoluteFill, staticFile, Img, Video as RemotionVideo } from 'remotion';
 import { AudioTrack } from './AudioTrack';
+import { SplitScreenVideo } from './SplitScreenVideo';
 
 // Dynamically generated component
 export const ${componentName} = (props) => {
@@ -37,9 +49,12 @@ export const ${componentName} = (props) => {
   
   // Hardcoded values from generation
   const videoSource = ${videoSource ? `"${videoSource}"` : "null"};
+  const demoVideoSource = ${demoVideoSource ? `"${demoVideoSource}"` : "null"};
   const titleText = "${titleText.replace(/"/g, '\\"')}";
   const textPosition = "${textPosition}";
   const enableAudio = ${enableAudio ? "true" : "false"};
+  const splitScreen = ${splitScreen ? "true" : "false"};
+  const splitPosition = "${splitPosition}";
   
   // Determine text position style
   const getTextPositionStyle = () => {
@@ -70,6 +85,67 @@ export const ${componentName} = (props) => {
   // Determine whether to show video or image
   const useVideo = videoSource && typeof videoSource === 'string';
 
+  // For split screen mode
+  if (splitScreen && demoVideoSource) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: 'black' }}>
+        {/* Split Screen Video Display */}
+        <SplitScreenVideo 
+          leftVideoSource={videoSource}
+          demoVideoSource={demoVideoSource}
+          volume={1}
+          splitPosition={splitPosition}
+        />
+        
+        {/* Overlay for text */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.3)',
+            zIndex: 10,
+            pointerEvents: 'none',
+          }}
+        />
+        
+        {/* Title with dynamic position - displayed on top of both videos */}
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            textAlign: 'center',
+            padding: '0 20px',
+            zIndex: 20,
+            ...positionStyle
+          }}
+        >
+          <h1
+            style={{
+              color: 'white',
+              fontSize: '64px',
+              fontWeight: 'bold',
+              textShadow: '0 0 10px rgba(0, 0, 0, 0.8)',
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {titleText}
+          </h1>
+        </div>
+        
+        {/* Audio handling */}
+        {enableAudio && audioFile && (
+          <AudioTrack 
+            audioFile={audioFile} 
+            offsetInSeconds={audioOffsetInSeconds}
+          />
+        )}
+      </AbsoluteFill>
+    );
+  }
+
+  // Default single video/image mode
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
       {/* Video or Image Background */}

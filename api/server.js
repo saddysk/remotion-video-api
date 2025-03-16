@@ -46,15 +46,42 @@ app.post("/render-video", async (req, res) => {
     const textPosition = req.body.textPosition || "bottom";
     const enableAudio = req.body.enableAudio || false;
 
+    // Split screen parameters
+    const splitScreen = req.body.splitScreen || false;
+    const demoVideoSource = req.body.demoVideoSource;
+    const splitPosition = req.body.splitPosition;
+
+    // Validate splitPosition value
+    const validSplitPositions = [
+      "left-right",
+      "right-left",
+      "top-bottom",
+      "bottom-top",
+    ];
+    if (splitScreen && !validSplitPositions.includes(splitPosition)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid splitPosition value. Must be one of: left-right, right-left, top-bottom, bottom-top",
+      });
+    }
+
     // Log explicit values for debugging
     console.log("Extracted titleText:", titleText);
     console.log("Extracted textPosition:", textPosition);
     console.log("Enable additional audio:", enableAudio);
+    console.log("Split screen mode:", splitScreen);
+    console.log("Split screen position:", splitPosition);
+    console.log("Right video source:", demoVideoSource);
 
     // Ensure paths are consistent
     const formattedAudioFile = audioFile.replace(/^\/public\//, "/");
     const formattedCoverImage = coverImage.replace(/^\/public\//, "/");
     const formattedVideoSource = videoSource?.replace(/^\/public\//, "/");
+    const formatteddemoVideoSource = demoVideoSource?.replace(
+      /^\/public\//,
+      "/"
+    );
 
     // Log which audio source will be used
     console.log(
@@ -70,6 +97,9 @@ app.post("/render-video", async (req, res) => {
       textPosition,
       videoSource: formattedVideoSource,
       enableAudio,
+      splitScreen,
+      demoVideoSource: formatteddemoVideoSource,
+      splitPosition,
     });
 
     console.log("Generated dynamic component:", componentName);
@@ -147,6 +177,8 @@ app.post("/render-video", async (req, res) => {
       usedValues: {
         titleText,
         textPosition,
+        splitScreen,
+        splitPosition,
       },
     });
   } catch (error) {
