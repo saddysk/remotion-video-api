@@ -1,16 +1,20 @@
 #!/bin/bash
 
-# Test rendering a video with side-by-side layout
-echo "Rendering video with side-by-side layout..."
+# Test rendering a video with direct URLs
+echo "Rendering video with direct URL sources..."
 curl -X POST http://localhost:3000/render-video \
   -H "Content-Type: application/json" \
   -d '{
-    "durationInSeconds": 10,
-    "videoSource": "/video.mp4",
-    "titleText": "SIDE BY SIDE VIDEOS",
+    "durationInSeconds": 5,
+    "videoSourceUrl": "https://rbpvjxsqghhirdixhaay.supabase.co/storage/v1/object/public/ai_ugc/dev/test.mp4",
+    "demoVideoSourceUrl": "https://rbpvjxsqghhirdixhaay.supabase.co/storage/v1/object/public/ai_ugc/0fvz63mttsrme0cn8svvrh4m2g.mp4",
+    "audioSourceUrl": "https://rbpvjxsqghhirdixhaay.supabase.co/storage/v1/object/public/ai_ugc/dev/audio.mp3",
+    "titleText": "VIDEO FROM DIRECT URL WITH SPLIT SCREEN",
     "textPosition": "bottom",
-    "enableAudio": false,
-    "splitScreen": false
+    "enableAudio": true,
+    "audioOffsetInSeconds": 0,
+    "splitScreen": true,
+    "splitPosition": "left-right"
   }'
 
 echo -e "\n\nNow try viewing the video at the URL shown above."

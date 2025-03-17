@@ -5,19 +5,24 @@ const path = require("path");
  * Generates a dynamic video component with hardcoded values
  * @param {Object} options Options for the video
  * @param {string} options.titleText The title text to display
+ * @param {string} options.durationInSeconds The duration of the video to be generated
+ * @param {string} options.audioOffsetInSeconds The sudio offset duration
  * @param {string} options.textPosition The position of the text (top, center, bottom)
- * @param {string} options.videoSource Path to the video source
+ * @param {string} options.videoSource Path or URL to the video source
  * @param {boolean} options.enableAudio Whether to enable additional audio alongside video
  * @param {boolean} options.splitScreen Whether to show two videos side by side
- * @param {string} options.demoVideoSource Path to the right video (when splitScreen is true)
+ * @param {string} options.demoVideoSource Path or URL to the right video (when splitScreen is true)
  * @param {string} options.splitPosition Layout of the videos (left-right, right-left, top-bottom, bottom-top)
  * @returns {Object} Information about the generated component
  */
 function generateDynamicVideo(options) {
   const {
     titleText,
+    durationInSeconds = 5,
+    audioOffsetInSeconds = 0,
     textPosition,
     videoSource,
+    audioSource,
     enableAudio,
     splitScreen = false,
     demoVideoSource,
@@ -38,21 +43,18 @@ import { SplitScreenVideo } from './SplitScreenVideo';
 
 // Dynamically generated component
 export const ${componentName} = (props) => {
-  console.log('Dynamic component rendering with props:', JSON.stringify(props));
-  
-  const { 
-    durationInSeconds = 10,
-    audioOffsetInSeconds = 6.9,
-    audioFile = '/audio.mp3',
-    coverImage = '/cover.jpg',
-  } = props || {};
-  
   // Hardcoded values from generation
-  const videoSource = ${videoSource ? `"${videoSource}"` : "null"};
-  const demoVideoSource = ${demoVideoSource ? `"${demoVideoSource}"` : "null"};
+  const videoSource = ${
+    videoSource ? `"${videoSource.replace(/"/g, '\\"')}"` : "null"
+  };
+  const demoVideoSource = ${
+    demoVideoSource ? `"${demoVideoSource.replace(/"/g, '\\"')}"` : "null"
+  };
+  const audioSource = ${
+    audioSource ? `"${audioSource.replace(/"/g, '\\"')}"` : "null"
+  };
   const titleText = "${titleText.replace(/"/g, '\\"')}";
   const textPosition = "${textPosition}";
-  const enableAudio = ${enableAudio ? "true" : "false"};
   const splitScreen = ${splitScreen ? "true" : "false"};
   const splitPosition = "${splitPosition}";
   
@@ -81,9 +83,15 @@ export const ${componentName} = (props) => {
   
   // Get position style
   const positionStyle = getTextPositionStyle();
-  
-  // Determine whether to show video or image
-  const useVideo = videoSource && typeof videoSource === 'string';
+
+  // Always include audio if audioSource is available, regardless of split screen mode
+  const AudioComponent = audioSource ? (
+    <AudioTrack 
+      audioSource={audioSource} 
+      offsetInSeconds={${audioOffsetInSeconds}}
+      enableAudio={${enableAudio}}
+    />
+  ) : null;
 
   // For split screen mode
   if (splitScreen && demoVideoSource) {
@@ -91,9 +99,8 @@ export const ${componentName} = (props) => {
       <AbsoluteFill style={{ backgroundColor: 'black' }}>
         {/* Split Screen Video Display */}
         <SplitScreenVideo 
-          leftVideoSource={videoSource}
+          videoSource={videoSource}
           demoVideoSource={demoVideoSource}
-          volume={1}
           splitPosition={splitPosition}
         />
         
@@ -134,13 +141,8 @@ export const ${componentName} = (props) => {
           </h1>
         </div>
         
-        {/* Audio handling */}
-        {enableAudio && audioFile && (
-          <AudioTrack 
-            audioFile={audioFile} 
-            offsetInSeconds={audioOffsetInSeconds}
-          />
-        )}
+        {/* Audio handling - always include if available */}
+        {AudioComponent}
       </AbsoluteFill>
     );
   }
@@ -150,17 +152,10 @@ export const ${componentName} = (props) => {
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
       {/* Video or Image Background */}
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        {useVideo ? (
-          <RemotionVideo
-            src={videoSource.startsWith('/public/') ? videoSource : staticFile(videoSource)}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }}
-          />
-        ) : (
-          <Img
-            src={coverImage.startsWith('/public/') ? coverImage : staticFile(coverImage)}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }}
-          />
-        )}
+      <RemotionVideo
+        src={videoSource}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }}
+      />
         
         {/* Overlay */}
         <div
@@ -197,14 +192,8 @@ export const ${componentName} = (props) => {
         </div>
       </div>
       
-      {/* Audio handling - Either add external audio only if video is not available 
-          OR add it alongside video's audio if enableAudio is true */}
-      {(!useVideo && audioFile) || (enableAudio && audioFile) ? (
-        <AudioTrack 
-          audioFile={audioFile} 
-          offsetInSeconds={audioOffsetInSeconds}
-        />
-      ) : null}
+      {/* Audio handling - always include if available */}
+      {AudioComponent}
     </AbsoluteFill>
   );
 };
@@ -225,11 +214,13 @@ export const RemotionRoot = () => {
       <Composition
         id="${componentName}"
         component={${componentName}}
-        durationInFrames={300}
+        durationInFrames={${durationInSeconds * 30}}
         fps={30}
-        width={1920}
-        height={1080}
-        defaultProps={{}}
+        width={1080}
+        height={1920}
+        defaultProps={{
+          durationInSeconds: ${durationInSeconds}
+        }}
       />
     </>
   );

@@ -18,7 +18,7 @@ const port = process.env.PORT || 3000;
 
 // Middlewares
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: "50mb" })); // Increased limit for larger requests
 app.use("/videos", express.static(outputDir));
 app.use("/public", express.static(path.join(__dirname, "../public")));
 
@@ -38,18 +38,19 @@ app.post("/render-video", async (req, res) => {
 
     // Extract props with defaults
     const durationInSeconds = req.body.durationInSeconds || 10;
-    const audioOffsetInSeconds = req.body.audioOffsetInSeconds || 6.9;
-    const audioFile = req.body.audioFile || "/audio.mp3";
-    const coverImage = req.body.coverImage || "/cover.jpg";
-    const videoSource = req.body.videoSource;
+    const audioOffsetInSeconds = req.body.audioOffsetInSeconds || 0; // Changed default to 0
     const titleText = req.body.titleText || "Default Title";
     const textPosition = req.body.textPosition || "bottom";
-    const enableAudio = req.body.enableAudio || false;
+    const enableAudio = req.body.enableAudio !== false; // Default to true
 
     // Split screen parameters
     const splitScreen = req.body.splitScreen || false;
-    const demoVideoSource = req.body.demoVideoSource;
     const splitPosition = req.body.splitPosition;
+
+    // Direct URL parameters
+    const videoSource = req.body.videoSourceUrl;
+    const demoVideoSource = req.body.demoVideoSourceUrl;
+    const audioSource = req.body.audioSourceUrl;
 
     // Validate splitPosition value
     const validSplitPositions = [
@@ -67,38 +68,29 @@ app.post("/render-video", async (req, res) => {
     }
 
     // Log explicit values for debugging
-    console.log("Extracted titleText:", titleText);
+    console.log("\nExtracted titleText:", titleText);
+    console.log("Duration of the Video (seconds):", durationInSeconds);
     console.log("Extracted textPosition:", textPosition);
     console.log("Enable additional audio:", enableAudio);
     console.log("Split screen mode:", splitScreen);
     console.log("Split screen position:", splitPosition);
-    console.log("Right video source:", demoVideoSource);
-
-    // Ensure paths are consistent
-    const formattedAudioFile = audioFile.replace(/^\/public\//, "/");
-    const formattedCoverImage = coverImage.replace(/^\/public\//, "/");
-    const formattedVideoSource = videoSource?.replace(/^\/public\//, "/");
-    const formatteddemoVideoSource = demoVideoSource?.replace(
-      /^\/public\//,
-      "/"
-    );
-
-    // Log which audio source will be used
-    console.log(
-      formattedVideoSource
-        ? "Using video's original audio"
-        : "Using external audio file"
-    );
+    console.log("Video source URL:", videoSource);
+    console.log("Demo video source URL:", demoVideoSource);
+    console.log("Audio source URL:", audioSource);
+    console.log("Audio offset (seconds):", audioOffsetInSeconds);
 
     // Generate a dynamic video component with the specified values
-    console.log("Generating dynamic component with title:", titleText);
+    console.log("\nGenerating dynamic component with title:", titleText);
     const { indexPath, componentName } = generateDynamicVideo({
       titleText,
+      durationInSeconds,
+      audioOffsetInSeconds,
       textPosition,
-      videoSource: formattedVideoSource,
-      enableAudio,
+      videoSource,
+      audioSource,
+      enableAudio: true, // Always enable audio if audioSource is provided
       splitScreen,
-      demoVideoSource: formatteddemoVideoSource,
+      demoVideoSource,
       splitPosition,
     });
 
@@ -111,6 +103,7 @@ app.post("/render-video", async (req, res) => {
 
     // Bundle the dynamic Remotion project
     console.log("Bundling dynamic component...");
+    // Don't pass bundleOptions, use default options
     const bundled = await bundle(indexPath);
 
     // Get the compositions
@@ -124,20 +117,6 @@ app.post("/render-video", async (req, res) => {
     // Calculate frames based on duration
     const durationInFrames = Math.floor(durationInSeconds * composition.fps);
 
-    // Create an explicit inputProps object
-    const inputProps = {
-      durationInSeconds,
-      audioOffsetInSeconds,
-      audioFile: formattedAudioFile,
-      coverImage: formattedCoverImage,
-    };
-
-    // Add a delay to make sure files are written completely
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    // Log final props being passed to renderer
-    console.log("Final inputProps:", JSON.stringify(inputProps));
-
     // Render the video
     console.log("Starting render...");
     await renderMedia({
@@ -145,16 +124,20 @@ app.post("/render-video", async (req, res) => {
       serveUrl: bundled,
       codec: "h264",
       outputLocation: outputPath,
-      inputProps,
       durationInFrames,
+      timeoutInMilliseconds: 420000, // 7 minutes overall timeout
+      delayRenderTimeoutInMilliseconds: 300000, // 5 minutes for delayRender timeouts
+
       onProgress: (progress) => {
-        console.log(
-          `Rendering progress: ${Math.floor(progress.progress * 100)}%`
+        // Use process.stdout.write with \r to update the same line
+        process.stdout.write(
+          `\rRendering progress: ${Math.floor(progress.progress * 100)}%`
         );
-      },
-      assetsInfo: {
-        root: path.resolve(__dirname, ".."),
-        publicPath: "/public",
+
+        // Add a newline when rendering is complete
+        if (progress.progress === 1) {
+          process.stdout.write("\n");
+        }
       },
     });
 
@@ -163,6 +146,9 @@ app.post("/render-video", async (req, res) => {
       fs.unlinkSync(indexPath);
       fs.unlinkSync(indexPath.replace("-index.jsx", ".jsx"));
       console.log("Cleaned up temporary files");
+      console.log(
+        "\n-------------------------------------------\n-------------------------------------------\n"
+      );
     } catch (err) {
       console.warn("Failed to clean up temporary files:", err);
     }
@@ -179,6 +165,9 @@ app.post("/render-video", async (req, res) => {
         textPosition,
         splitScreen,
         splitPosition,
+        usedVideoSource: videoSource,
+        usedDemoVideoSource: demoVideoSource,
+        usedAudioSource: audioSource,
       },
     });
   } catch (error) {
@@ -187,11 +176,11 @@ app.post("/render-video", async (req, res) => {
       success: false,
       message: "Failed to render video",
       error: error.message,
+      stack: error.stack,
     });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-  console.log(`Videos will be available at http://localhost:${port}/videos/`);
+  console.log(`Server running at http://localhost:${port}\n`);
 });

@@ -1,7 +1,8 @@
 import React from "react";
-import { Audio, staticFile, useVideoConfig } from "remotion";
+import { Audio, useVideoConfig } from "remotion";
 
-export const AudioTrack = ({ audioFile, offsetInSeconds }) => {
+// TODO: Use enableAudio or pass a param externalAudioOnly to make the volume 100%
+export const AudioTrack = ({ enableAudio, audioSource, offsetInSeconds }) => {
   const { fps } = useVideoConfig();
 
   // Convert offset to frames
@@ -9,9 +10,9 @@ export const AudioTrack = ({ audioFile, offsetInSeconds }) => {
 
   return (
     <Audio
-      src={audioFile.startsWith("/public/") ? audioFile : staticFile(audioFile)}
+      src={audioSource}
       startFrom={offsetInFrames} // Start audio from specified offset in frames
-      volume={0.25} // Volume for external audio - 25%
+      volume={0.12} // Volume for external audio - 12%
     />
   );
 };
