@@ -13,12 +13,14 @@ const path = require("path");
  * @param {boolean} options.splitScreen Whether to show two videos side by side
  * @param {string} options.demoVideoSource Path or URL to the right video (when splitScreen is true)
  * @param {string} options.splitPosition Layout of the videos (left-right, right-left, top-bottom, bottom-top)
+ * @param {boolean} options.sequentialMode Whether to show videos sequentially (one after another) instead of split screen
+ * @param {number} options.firstVideoDuration Duration of the first video in seconds when in sequential mode
  * @returns {Object} Information about the generated component
  */
 function generateDynamicVideo(options) {
   const {
     titleText,
-    durationInSeconds = 10,
+    durationInSeconds,
     audioOffsetInSeconds = 0,
     textPosition,
     videoSource,
@@ -27,6 +29,8 @@ function generateDynamicVideo(options) {
     splitScreen = false,
     demoVideoSource,
     splitPosition,
+    sequentialMode = false,
+    firstVideoDuration,
   } = options;
 
   // Create a unique filename based on timestamp
@@ -37,9 +41,10 @@ function generateDynamicVideo(options) {
   // Generate the component code with hardcoded values
   const componentCode = `
 import React from 'react';
-import { AbsoluteFill, staticFile, Img, Video as RemotionVideo } from 'remotion';
+import { AbsoluteFill, Video as RemotionVideo } from 'remotion';
 import { AudioTrack } from './AudioTrack';
 import { SplitScreenVideo } from './SplitScreenVideo';
+import { SequentialVideo } from './SequentialVideo';
 
 // Dynamically generated component
 export const ${componentName} = (props) => {
@@ -57,6 +62,8 @@ export const ${componentName} = (props) => {
   const textPosition = "${textPosition}";
   const splitScreen = ${splitScreen ? "true" : "false"};
   const splitPosition = "${splitPosition}";
+  const sequentialMode = ${sequentialMode ? "true" : "false"};
+  const firstVideoDuration = ${firstVideoDuration};
   
   // Determine text position style
   const getTextPositionStyle = () => {
@@ -93,6 +100,25 @@ export const ${componentName} = (props) => {
     />
   ) : null;
 
+  // For sequential mode
+  if (sequentialMode && demoVideoSource) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: 'black' }}>
+        {/* Sequential Video Display */}
+        <SequentialVideo 
+          videoSource={videoSource}
+          demoVideoSource={demoVideoSource}
+          firstVideoDuration={firstVideoDuration}
+          titleText={titleText}
+          textPosition={textPosition}
+        />
+        
+        {/* Audio handling - always include if available */}
+        {AudioComponent}
+      </AbsoluteFill>
+    );
+  }
+
   // For split screen mode
   if (splitScreen && demoVideoSource) {
     return (
@@ -103,43 +129,36 @@ export const ${componentName} = (props) => {
           demoVideoSource={demoVideoSource}
           splitPosition={splitPosition}
         />
-        
-        {/* Overlay for text */}
-        <div
-          style={{
-            position: 'absolute',
-            top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-            zIndex: 10,
-            pointerEvents: 'none',
-          }}
-        />
-        
+
         {/* Title with dynamic position - displayed on top of both videos */}
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            textAlign: 'center',
-            padding: '0 20px',
-            zIndex: 20,
-            ...positionStyle
-          }}
-        >
-          <h1
+          <div
             style={{
-              color: 'white',
-              fontSize: '64px',
-              fontWeight: 'bold',
-              textShadow: '0 0 10px rgba(0, 0, 0, 0.8)',
-              margin: 0,
-              lineHeight: 1.2,
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              padding: '0 20px',
+              zIndex: 20,
+              ...positionStyle
             }}
           >
-            {titleText}
-          </h1>
-        </div>
+            <h1
+              style={{
+                color: 'white',
+                fontSize: '64px',
+                fontFamily: 'Inter, sans-serif',
+                fontWeight: 700,
+                textShadow:
+                      '-4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000, 0 -4px 0 #000, 0 4px 0 #000, -4px 0 0 #000, 4px 0 0 #000',
+                margin: 0,
+                lineHeight: 1.2,
+                paddingLeft: "12px",
+                paddingRight: "12px",
+              }}
+            >
+              {titleText}
+            </h1>
+          </div>
         
         {/* Audio handling - always include if available */}
         {AudioComponent}
@@ -154,42 +173,36 @@ export const ${componentName} = (props) => {
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <RemotionVideo
         src={videoSource}
-        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
       />
-        
-        {/* Overlay */}
-        <div
-          style={{
-            position: 'absolute',
-            top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          }}
-        />
-        
         {/* Title with dynamic position */}
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            textAlign: 'center',
-            padding: '0 20px',
-            ...positionStyle
-          }}
-        >
-          <h1
+          <div
             style={{
-              color: 'white',
-              fontSize: '64px',
-              fontWeight: 'bold',
-              textShadow: '0 0 10px rgba(0, 0, 0, 0.8)',
-              margin: 0,
-              lineHeight: 1.2,
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              padding: '0 20px',
+              ...positionStyle
             }}
           >
-            {titleText}
-          </h1>
-        </div>
+            <h1
+              style={{
+                color: 'white',
+                fontSize: '64px',
+                fontFamily: 'Inter, sans-serif',
+                fontWeight: 700,
+                textShadow:
+                      '-4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000, 0 -4px 0 #000, 0 4px 0 #000, -4px 0 0 #000, 4px 0 0 #000',
+                margin: 0,
+                lineHeight: 1.2,
+                paddingLeft: "12px",
+                paddingRight: "12px",
+              }}
+            >
+              {titleText}
+            </h1>
+          </div>
       </div>
       
       {/* Audio handling - always include if available */}

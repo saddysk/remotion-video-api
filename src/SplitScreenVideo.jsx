@@ -7,13 +7,11 @@ import { AbsoluteFill, staticFile, Video as RemotionVideo } from "remotion";
  * @param {Object} props Component props
  * @param {string} props.videoSource Path or URL to the first video
  * @param {string} props.demoVideoSource Path or URL to the second video
- * @param {number} props.opacity Video opacity (0-1)
  * @param {string} props.splitPosition Layout of the videos (left-right, right-left, top-bottom, bottom-top)
  */
 export const SplitScreenVideo = ({
   videoSource,
   demoVideoSource,
-  opacity = 0.7,
   splitPosition,
 }) => {
   // Check if video sources are provided
@@ -62,7 +60,6 @@ export const SplitScreenVideo = ({
               width: "100%",
               height: "100%",
               objectFit: "cover",
-              opacity: opacity,
             }}
             volume={1}
           />
@@ -105,7 +102,6 @@ export const SplitScreenVideo = ({
               width: "100%",
               height: "100%",
               objectFit: "cover",
-              opacity: opacity,
             }}
             volume={0}
           />

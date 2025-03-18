@@ -6,6 +6,10 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const supabase = require("./config/supabase.config");
 const handleVideoGeneration = require("./src/videoGeneration");
+const {
+  initializeFileServer,
+  shutdownFileServer,
+} = require("./src/fileServer");
 
 // Create output directory if it doesn't exist
 const outputDir = path.resolve(__dirname, "./out");
@@ -195,6 +199,9 @@ const server = app.listen(port, async () => {
   console.log(`Server running at http://localhost:${port}`);
 
   try {
+    // Initialize file server at startup
+    initializeFileServer(outputDir);
+
     // Initialize Supabase real-time subscription
     const subscription = await setupRealTimeSubscription();
 
@@ -205,6 +212,9 @@ const server = app.listen(port, async () => {
       // Close subscription
       await subscription.unsubscribe();
 
+      // Shutdown file server
+      await shutdownFileServer();
+
       // Close server
       server.close(() => {
         console.log("Server closed");
@@ -214,9 +224,7 @@ const server = app.listen(port, async () => {
 
     console.log("Service started successfully!");
   } catch (error) {
-    console.error("Failed to start Supabase subscription:", error);
-    console.log(
-      "Server is running but Supabase subscription failed to initialize."
-    );
+    console.error("Failed to initialize services:", error);
+    console.log("Server is running but some initializations failed.");
   }
 });

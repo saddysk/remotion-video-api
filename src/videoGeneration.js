@@ -9,6 +9,8 @@ const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const ffmpeg = require("fluent-ffmpeg");
 const util = require("util");
 const { exec } = require("child_process");
+const getVideoDuration = require("../libs/utils");
+const { getFileUrl } = require("./fileServer");
 
 // Set ffmpeg path
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -109,7 +111,6 @@ async function handleVideoGeneration(id, data, outputDir) {
     const remotionData = data.remotion || {};
 
     // Map fields based on provided mapping
-    const durationInSeconds = remotionData.duration || 10;
     const audioOffsetInSeconds = remotionData.audio_offset || 0;
     const titleText = remotionData.caption || "Default Title";
     const textPosition = data.text_alignment || "bottom";
@@ -117,23 +118,21 @@ async function handleVideoGeneration(id, data, outputDir) {
     const demoVideoSource = remotionData.demo || null;
     const audioSource = remotionData.sound || null;
     const enableAudio = audioSource !== null;
-    const splitScreen = demoVideoSource !== null;
-    const splitPosition = "left-right";
-    // const splitPosition = data.video_alignment || "left-right";
+    const sequentialMode = data.video_alignment === "serial";
+    const splitScreen = !sequentialMode && demoVideoSource !== null;
 
-    // Validate splitPosition value if splitScreen is enabled
-    const validSplitPositions = [
-      "left-right",
-      "right-left",
-      "top-bottom",
-      "bottom-top",
-    ];
-
-    if (splitScreen && !validSplitPositions.includes(splitPosition)) {
-      throw new Error(
-        "Invalid splitPosition value. Must be one of: left-right, right-left, top-bottom, bottom-top"
-      );
+    let splitPosition = null;
+    if (splitScreen) {
+      if (data.video_alignment === "side") {
+        splitPosition = "right-left";
+      } else if (data.video_alignment === "top") {
+        splitPosition = "bottom-top";
+      }
     }
+
+    // Default fallback durations in case we can't determine real durations
+    let firstVideoDuration = 6; // Default fallback
+    let durationInSeconds = 30; // Default fallback
 
     // Update Supabase with status
     await supabase
@@ -141,6 +140,23 @@ async function handleVideoGeneration(id, data, outputDir) {
       .update({ status: "processing" })
       .eq("id", id);
 
+    // Validate splitPosition value if splitScreen is enabled and not in sequential mode
+    const validSplitPositions = [
+      "left-right",
+      "right-left",
+      "top-bottom",
+      "bottom-top",
+    ];
+
+    if (
+      splitScreen &&
+      !sequentialMode &&
+      !validSplitPositions.includes(splitPosition)
+    ) {
+      throw new Error(
+        "Invalid splitPosition value. Must be one of: left-right, right-left, top-bottom, bottom-top"
+      );
+    }
     // // Log parameters for debugging
     // console.log("\nParameters for video generation:");
     // console.log("Title Text:", titleText);
@@ -148,6 +164,8 @@ async function handleVideoGeneration(id, data, outputDir) {
     // console.log("Text Position:", textPosition);
     // console.log("Enable Audio:", enableAudio);
     // console.log("Split Screen:", splitScreen);
+    // console.log("Sequential Mode:", sequentialMode);
+    // console.log("First Video Duration:", firstVideoDuration);
     // console.log("Split Position:", splitPosition);
     // console.log("Video Source URL:", videoSource);
     // console.log("Demo Video Source URL:", demoVideoSource);
@@ -156,34 +174,6 @@ async function handleVideoGeneration(id, data, outputDir) {
 
     // Process video sources to ensure codec compatibility
     console.log("\nEnsuring video codec compatibility...");
-
-    // Create an express server to serve the transcoded files if needed
-    let fileServer = null;
-    const serverPort = 8787;
-    const serverUrl = `http://localhost:${serverPort}`;
-
-    // Function to serve local files if needed
-    const setupFileServer = () => {
-      if (fileServer) return; // Only setup once
-
-      const express = require("express");
-      const app = express();
-
-      // Serve files from the output directory
-      app.use("/videos", express.static(outputDir));
-
-      // Start the server
-      fileServer = app.listen(serverPort, () => {
-        console.log(`File server started on ${serverUrl}`);
-      });
-    };
-
-    // Function to get server URL for a file
-    const getFileUrl = (filePath) => {
-      if (!filePath || filePath.startsWith("http")) return filePath;
-      const filename = path.basename(filePath);
-      return `${serverUrl}/videos/${filename}`;
-    };
 
     // Process main video
     let localMainVideoPath = null;
@@ -201,7 +191,7 @@ async function handleVideoGeneration(id, data, outputDir) {
     // Process demo video if needed
     let localDemoVideoPath = null;
     let processedDemoSource = null;
-    if (splitScreen && demoVideoSource) {
+    if ((splitScreen || sequentialMode) && demoVideoSource) {
       processedDemoSource = await ensureCompatibleCodec(
         demoVideoSource,
         outputDir,
@@ -217,19 +207,54 @@ async function handleVideoGeneration(id, data, outputDir) {
       }
     }
 
-    // Setup file server if we have any local files
-    if (localMainVideoPath || localDemoVideoPath) {
-      setupFileServer();
-      console.log("Local file server started for transcoded videos");
-    }
-
-    // Get proper URLs for videos
+    // Get proper URLs for videos using the shared file server
     const mainVideoUrl = localMainVideoPath
       ? getFileUrl(localMainVideoPath)
       : videoSource;
     const demoVideoUrl = localDemoVideoPath
       ? getFileUrl(localDemoVideoPath)
       : demoVideoSource;
+
+    // Determine video durations
+    console.log("\nDetecting video durations...");
+    const mainVideoDuration = await getVideoDuration(mainVideoUrl, execPromise);
+    const demoVideoDuration = await getVideoDuration(demoVideoUrl, execPromise);
+
+    console.log(
+      `Main video: ${mainVideoDuration || "unknown"} secs, Demo video: ${
+        demoVideoDuration || "unknown"
+      } secs`
+    );
+
+    // Apply the dynamic duration logic based on the requirements
+    if (mainVideoDuration !== null) {
+      // Case 4: If no demo video, use main video duration
+      if (demoVideoSource === null) {
+        durationInSeconds = mainVideoDuration;
+      }
+
+      // Case 3: In sequential mode, firstVideoDuration = main video duration
+      if (sequentialMode) {
+        firstVideoDuration = mainVideoDuration;
+      }
+    }
+
+    if (demoVideoDuration !== null) {
+      // Case 1: If splitPosition is not null, use demo video duration
+      if (splitPosition !== null) {
+        durationInSeconds = demoVideoDuration;
+      }
+
+      // Case 2: In sequential mode, use sum of both video durations
+      if (sequentialMode && mainVideoDuration !== null) {
+        durationInSeconds = mainVideoDuration + demoVideoDuration;
+      }
+    }
+
+    // Log the calculated durations
+    console.log(
+      `[Durations] Template: ${firstVideoDuration} secs, Demo: ${durationInSeconds} secs`
+    );
 
     // Generate a dynamic video component with the specified values
     console.log("\nGenerating dynamic component with title:", titleText);
@@ -244,6 +269,8 @@ async function handleVideoGeneration(id, data, outputDir) {
       splitScreen,
       demoVideoSource: demoVideoUrl,
       splitPosition,
+      sequentialMode,
+      firstVideoDuration,
     });
 
     console.log("Generated dynamic component:", componentName);
@@ -273,11 +300,8 @@ async function handleVideoGeneration(id, data, outputDir) {
       throw new Error(`Composition '${componentName}' not found`);
     }
 
-    // Calculate frames based on duration
-    const durationInFrames = Math.floor(durationInSeconds * composition.fps);
-
     // Render the video with increased timeout for safety
-    console.log("Starting render...");
+    console.log(`Starting render video - ${id}...`);
     await renderMedia({
       composition,
       serveUrl: bundled,
@@ -287,15 +311,14 @@ async function handleVideoGeneration(id, data, outputDir) {
       onProgress: (progress) => {
         // Use process.stdout.write with \r to update the same line
         const percent = Math.floor(progress.progress * 100);
-        const frame = progress.renderedFrames || 0;
 
         // process.stdout.write(
-        //   `\rRendering progress: ${percent}% (Frame ${frame})`
+        //   `\rRendering progress: ${percent}%`
         // );
 
-        // Log every 20% for debugging
-        if (percent % 20 === 0 && percent > 0 && progress.renderedFrames) {
-          process.stdout.write(`\rRendering progress: ${percent}%`);
+        // Log every 25% for debugging
+        if (percent % 25 === 0 && percent > 0 && progress.renderedFrames) {
+          process.stdout.write(`\rRendering progress video ${id}: ${percent}%`);
         }
       },
     });
@@ -304,7 +327,7 @@ async function handleVideoGeneration(id, data, outputDir) {
     try {
       fs.unlinkSync(indexPath);
       fs.unlinkSync(indexPath.replace("-index.jsx", ".jsx"));
-      console.log("Cleaned up temporary component files");
+      console.log("\nCleaned up temporary component files");
     } catch (err) {
       console.warn("Failed to clean up temporary component files:", err);
     }
@@ -344,13 +367,6 @@ async function handleVideoGeneration(id, data, outputDir) {
           console.warn(`Failed to delete temporary file ${tempFile}:`, err);
         }
       }
-
-      // Shutdown the file server if it was created
-      if (fileServer) {
-        fileServer.close(() => {
-          console.log("File server shut down");
-        });
-      }
     } catch (err) {
       console.warn("Failed to delete local video file:", err);
     }
@@ -371,17 +387,6 @@ async function handleVideoGeneration(id, data, outputDir) {
         }
       } catch (err) {
         console.warn(`Error cleaning up temporary file ${tempFile}:`, err);
-      }
-    }
-
-    // Shutdown the file server if it was created
-    if (fileServer) {
-      try {
-        fileServer.close(() => {
-          console.log("File server shut down after error");
-        });
-      } catch (err) {
-        console.warn("Error shutting down file server:", err);
       }
     }
 
