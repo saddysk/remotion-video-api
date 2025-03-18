@@ -89,7 +89,7 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
     const outputPath = path.resolve(outputDir, outputFilename);
 
     // Bundle the dynamic Remotion project
-    console.log("Bundling dynamic component...");
+    console.log("Bundling dynamic component...\n");
     const bundled = await bundle(indexPath);
 
     // Get the compositions
@@ -115,10 +115,10 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
       delayRenderTimeoutInMilliseconds: 300000, // 5 minutes for delayRender timeouts
 
       onProgress: (progress) => {
-        // Use process.stdout.write with \r to update the same line
-        process.stdout.write(
-          `\rRendering progress: ${Math.floor(progress.progress * 100)}%`
-        );
+        // // Use process.stdout.write with \r to update the same line
+        // process.stdout.write(
+        //   `\rRendering progress: ${Math.floor(progress.progress * 100)}%`
+        // );
 
         // Add a newline when rendering is complete
         if (progress.progress === 1) {
