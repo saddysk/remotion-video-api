@@ -7,11 +7,6 @@ const bodyParser = require("body-parser");
 const supabase = require("./config/supabase.config");
 const handleVideoGeneration = require("./src/videoGeneration");
 
-// Kubernetes/container specific configurations
-const SHUTDOWN_GRACE_PERIOD = 30000; // 30 seconds for graceful shutdown
-const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || "2"); // How many videos to render simultaneously
-const HEALTH_PROBE_INTERVAL = 10000; // Health check interval
-
 // Create output directory if it doesn't exist
 const outputDir = path.resolve(__dirname, "./out");
 if (!fs.existsSync(outputDir)) {
@@ -28,8 +23,8 @@ app.use(bodyParser.json({ limit: "50mb" }));
 app.use("/videos", express.static(outputDir));
 app.use("/public", express.static(path.join(__dirname, "./public")));
 
-// Max retry count for rendering operations
-const MAX_RETRIES = 3;
+// Configuration for video rendering
+const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || "2"); // How many videos to render simultaneously
 
 // Job queue for handling concurrent renders
 class RenderQueue {
@@ -37,8 +32,6 @@ class RenderQueue {
     this.queue = [];
     this.concurrency = concurrency;
     this.running = 0;
-    this.lastHealthCheck = Date.now();
-    this.healthy = true;
   }
 
   add(id, data) {
@@ -68,27 +61,10 @@ class RenderQueue {
     }
   }
 
-  checkHealth() {
-    // Check if queue is processing jobs within expected timeframes
-    const now = Date.now();
-    if (this.running > 0 && now - this.lastHealthCheck > 300000) {
-      // 5 minutes
-      console.warn(
-        "Health check: Queue items have been processing for over 5 minutes"
-      );
-      this.healthy = false;
-    } else {
-      this.lastHealthCheck = now;
-      this.healthy = true;
-    }
-    return this.healthy;
-  }
-
   getStatus() {
     return {
       queueLength: this.queue.length,
       runningJobs: this.running,
-      isHealthy: this.healthy,
     };
   }
 }
@@ -127,56 +103,21 @@ async function setupRealTimeSubscription() {
     )
     .subscribe();
 
-  // .on(
-  //   "postgres_changes",
-  //   {
-  //     event: "UPDATE",
-  //     schema: "public",
-  //     table: "generated_videos",
-  //     filter: "remotion_video=is.null,status=eq.pending",
-  //   },
-  //   (payload) => {
-  //     // Only process updates where remotion_video is null and status is pending
-  //     if (!payload.new.remotion_video && payload.new.status === "pending") {
-  //       console.log("Video update request received:", payload.new.id);
-  //       renderQueue
-  //         .add(payload.new.id, payload.new)
-  //         .catch((error) =>
-  //           console.error(
-  //             `Queue processing error for ${payload.new.id}:`,
-  //             error
-  //           )
-  //         );
-  //     }
-  //   }
-  // )
-
   console.log("Subscription established, waiting for events...");
 
   return subscription;
 }
 
-// Add health check endpoint for Kubernetes probes
-app.get("/health", (req, res) => {
+// Simple status endpoint
+app.get("/status", (req, res) => {
   const queueStatus = renderQueue.getStatus();
-  const isHealthy = renderQueue.checkHealth();
 
-  if (isHealthy) {
-    res.status(200).json({
-      status: "ok",
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-      queue: queueStatus,
-    });
-  } else {
-    res.status(503).json({
-      status: "degraded",
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-      queue: queueStatus,
-      message: "Render queue processing is delayed",
-    });
-  }
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    queue: queueStatus,
+  });
 });
 
 // Add a metrics endpoint for monitoring
@@ -192,69 +133,62 @@ app.get("/metrics", (req, res) => {
   });
 });
 
-// TODO: [IN CASE REQUIRED] Add a manual trigger endpoint for testing
-// app.post("/trigger-video-generation", async (req, res) => {
-//   try {
-//     const { id } = req.body;
+app.post("/trigger-video-generation", async (req, res) => {
+  try {
+    const { id } = req.body;
 
-//     if (!id) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Missing required parameter: id",
-//       });
-//     }
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required parameter: id",
+      });
+    }
 
-//     // Fetch the record from Supabase
-//     const { data, error } = await supabase
-//       .from("generated_videos")
-//       .select("*")
-//       .eq("id", id)
-//       .single();
+    // Fetch the record from Supabase
+    const { data, error } = await supabase
+      .from("generated_videos")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-//     if (error) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Record not found",
-//         error: error.message,
-//       });
-//     }
+    if (error) {
+      return res.status(404).json({
+        success: false,
+        message: "Record not found",
+        error: error.message,
+      });
+    }
 
-//     // Update status to pending
-//     await supabase
-//       .from("generated_videos")
-//       .update({ status: "pending" })
-//       .eq("id", id);
+    // Add to the render queue
+    renderQueue
+      .add(id, data)
+      .then(() => {
+        console.log(
+          `Manually triggered video generation for ID: ${id} completed`
+        );
+      })
+      .catch((error) => {
+        console.error(
+          `Manually triggered video generation for ID: ${id} failed:`,
+          error
+        );
+      });
 
-//     // Add to the render queue
-//     renderQueue
-//       .add(id, data)
-//       .then(() => {
-//         console.log(
-//           `Manually triggered video generation for ID: ${id} completed`
-//         );
-//       })
-//       .catch((error) => {
-//         console.error(
-//           `Manually triggered video generation for ID: ${id} failed:`,
-//           error
-//         );
-//       });
-
-//     res.json({
-//       success: true,
-//       message: "Video generation process added to queue",
-//       id,
-//       queueStatus: renderQueue.getStatus(),
-//     });
-//   } catch (error) {
-//     console.error("Error triggering video generation:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Failed to trigger video generation",
-//       error: error.message,
-//     });
-//   }
-// });
+    res.json({
+      success: true,
+      message: "Video generation process added to queue",
+      id,
+      queueStatus: renderQueue.getStatus(),
+    });
+  } catch (error) {
+    console.error("Error triggering video generation:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to trigger video generation",
+      error: error.message,
+    });
+  }
+});
 
 // Start the server and setup Supabase subscription
 const server = app.listen(port, async () => {
@@ -264,36 +198,18 @@ const server = app.listen(port, async () => {
     // Initialize Supabase real-time subscription
     const subscription = await setupRealTimeSubscription();
 
-    // Setup periodic health checks
-    const healthInterval = setInterval(() => {
-      renderQueue.checkHealth();
-    }, HEALTH_PROBE_INTERVAL);
+    // Setup graceful shutdown for normal process termination
+    process.on("SIGINT", async () => {
+      console.log("Server shutdown initiated...");
 
-    // Handle graceful shutdown
-    process.on("SIGTERM", async () => {
-      console.log("SIGTERM received, starting graceful shutdown...");
-      clearInterval(healthInterval);
+      // Close subscription
+      await subscription.unsubscribe();
 
-      // Give time for current jobs to complete
-      const queueStatus = renderQueue.getStatus();
-      if (queueStatus.runningJobs > 0) {
-        console.log(
-          `Waiting for ${queueStatus.runningJobs} active jobs to complete...`
-        );
-
-        // Wait for grace period before forcing shutdown
-        setTimeout(() => {
-          console.log("Shutdown grace period expired, forcing exit");
-          process.exit(0);
-        }, SHUTDOWN_GRACE_PERIOD);
-      } else {
-        console.log("No active jobs, shutting down immediately");
-        await subscription.unsubscribe();
-        server.close(() => {
-          console.log("Server closed");
-          process.exit(0);
-        });
-      }
+      // Close server
+      server.close(() => {
+        console.log("Server closed");
+        process.exit(0);
+      });
     });
 
     console.log("Service started successfully!");

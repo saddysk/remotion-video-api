@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const { bundle } = require("@remotion/bundler");
 const { getCompositions, renderMedia } = require("@remotion/renderer");
