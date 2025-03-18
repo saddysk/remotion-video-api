@@ -5,16 +5,104 @@ const { getCompositions, renderMedia } = require("@remotion/renderer");
 const generateDynamicVideo = require("./generateDynamicVideo");
 const { uploadToSupabase } = require("../libs/supabase/storage");
 const supabase = require("../config/supabase.config");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+const ffmpeg = require("fluent-ffmpeg");
+const util = require("util");
+const { exec } = require("child_process");
+
+// Set ffmpeg path
+ffmpeg.setFfmpegPath(ffmpegPath);
+const execPromise = util.promisify(exec);
+
+/**
+ * Ensures video is using a compatible codec (H.264) for Remotion
+ * @param {string} videoUrl URL of the video to check/transcode
+ * @param {string} outputDir Directory to save transcoded file
+ * @param {string} id Unique identifier for the file
+ * @returns {Promise<string>} Path to the compatible video file
+ */
+async function ensureCompatibleCodec(videoUrl, outputDir, id) {
+  if (!videoUrl) return null;
+
+  console.log(`Checking codec compatibility for: ${videoUrl}`);
+
+  try {
+    // Try to detect source video codec using ffprobe
+    let needsTranscode = false;
+
+    try {
+      const ffprobeCommand = `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${videoUrl}"`;
+      const { stdout } = await execPromise(ffprobeCommand);
+
+      const detectedCodec = stdout.trim().toLowerCase();
+      console.log(`Detected source codec: ${detectedCodec}`);
+
+      // Check if transcoding is needed
+      if (detectedCodec === "hevc" || detectedCodec === "h265") {
+        needsTranscode = true;
+        console.log("HEVC/H.265 codec detected, transcoding required");
+      }
+    } catch (err) {
+      console.warn(
+        "Could not detect video codec, will transcode to be safe:",
+        err.message
+      );
+      needsTranscode = true;
+    }
+
+    // If transcoding is not needed, return original URL
+    if (!needsTranscode) {
+      console.log("Video already uses compatible codec, no transcoding needed");
+      return videoUrl;
+    }
+
+    // Transcode to H.264
+    const tempFile = path.join(outputDir, `temp-h264-${id}-${Date.now()}.mp4`);
+    console.log(`Transcoding to H.264: ${tempFile}`);
+
+    return new Promise((resolve, reject) => {
+      ffmpeg(videoUrl)
+        .outputOptions([
+          "-c:v libx264", // Use H.264 codec
+          "-crf 23", // Reasonable quality
+          "-preset fast", // Fast encoding speed
+          "-c:a aac", // AAC audio codec
+          "-strict experimental",
+        ])
+        .output(tempFile)
+        .on("progress", (progress) => {
+          // console.log(
+          //   `Transcoding progress: ${Math.round(progress.percent || 0)}%`
+          // );
+        })
+        .on("end", () => {
+          console.log("Transcoding completed successfully");
+          resolve(tempFile);
+        })
+        .on("error", (err) => {
+          console.error("Transcoding error:", err);
+          reject(err);
+        })
+        .run();
+    });
+  } catch (error) {
+    console.error("Error in codec compatibility check:", error);
+    return videoUrl; // Fall back to original URL if anything fails
+  }
+}
 
 /**
  * Main function to handle video generation triggered by Supabase
  * @param {string} id The ID of the generated_videos record
  * @param {Object} data The data from the generated_videos record
- * @param {number} retryCount Current retry count (default 0)
+ * @param {string} outputDir Directory to save output files
  */
-async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
+async function handleVideoGeneration(id, data, outputDir) {
   console.log(`Processing video generation for ID: ${id}`);
-  console.log(`Data received:`, JSON.stringify(data));
+  // console.log(`Data received:`, JSON.stringify(data));
+
+  // Track temporary files to clean up later
+  const tempFiles = [];
 
   try {
     // Extract properties from data and remotion JSONB field
@@ -53,18 +141,95 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
       .update({ status: "processing" })
       .eq("id", id);
 
-    // Log parameters for debugging
-    console.log("\nParameters for video generation:");
-    console.log("Title Text:", titleText);
-    console.log("Duration (seconds):", durationInSeconds);
-    console.log("Text Position:", textPosition);
-    console.log("Enable Audio:", enableAudio);
-    console.log("Split Screen:", splitScreen);
-    console.log("Split Position:", splitPosition);
-    console.log("Video Source URL:", videoSource);
-    console.log("Demo Video Source URL:", demoVideoSource);
-    console.log("Audio Source URL:", audioSource);
-    console.log("Audio Offset (seconds):", audioOffsetInSeconds);
+    // // Log parameters for debugging
+    // console.log("\nParameters for video generation:");
+    // console.log("Title Text:", titleText);
+    // console.log("Duration (seconds):", durationInSeconds);
+    // console.log("Text Position:", textPosition);
+    // console.log("Enable Audio:", enableAudio);
+    // console.log("Split Screen:", splitScreen);
+    // console.log("Split Position:", splitPosition);
+    // console.log("Video Source URL:", videoSource);
+    // console.log("Demo Video Source URL:", demoVideoSource);
+    // console.log("Audio Source URL:", audioSource);
+    // console.log("Audio Offset (seconds):", audioOffsetInSeconds);
+
+    // Process video sources to ensure codec compatibility
+    console.log("\nEnsuring video codec compatibility...");
+
+    // Create an express server to serve the transcoded files if needed
+    let fileServer = null;
+    const serverPort = 8787;
+    const serverUrl = `http://localhost:${serverPort}`;
+
+    // Function to serve local files if needed
+    const setupFileServer = () => {
+      if (fileServer) return; // Only setup once
+
+      const express = require("express");
+      const app = express();
+
+      // Serve files from the output directory
+      app.use("/videos", express.static(outputDir));
+
+      // Start the server
+      fileServer = app.listen(serverPort, () => {
+        console.log(`File server started on ${serverUrl}`);
+      });
+    };
+
+    // Function to get server URL for a file
+    const getFileUrl = (filePath) => {
+      if (!filePath || filePath.startsWith("http")) return filePath;
+      const filename = path.basename(filePath);
+      return `${serverUrl}/videos/${filename}`;
+    };
+
+    // Process main video
+    let localMainVideoPath = null;
+    const processedVideoSource = await ensureCompatibleCodec(
+      videoSource,
+      outputDir,
+      `${id}-main`
+    );
+    if (processedVideoSource !== videoSource && processedVideoSource !== null) {
+      console.log(`Main video transcoded to: ${processedVideoSource}`);
+      localMainVideoPath = processedVideoSource;
+      tempFiles.push(processedVideoSource);
+    }
+
+    // Process demo video if needed
+    let localDemoVideoPath = null;
+    let processedDemoSource = null;
+    if (splitScreen && demoVideoSource) {
+      processedDemoSource = await ensureCompatibleCodec(
+        demoVideoSource,
+        outputDir,
+        `${id}-demo`
+      );
+      if (
+        processedDemoSource !== demoVideoSource &&
+        processedDemoSource !== null
+      ) {
+        console.log(`Demo video transcoded to: ${processedDemoSource}`);
+        localDemoVideoPath = processedDemoSource;
+        tempFiles.push(processedDemoSource);
+      }
+    }
+
+    // Setup file server if we have any local files
+    if (localMainVideoPath || localDemoVideoPath) {
+      setupFileServer();
+      console.log("Local file server started for transcoded videos");
+    }
+
+    // Get proper URLs for videos
+    const mainVideoUrl = localMainVideoPath
+      ? getFileUrl(localMainVideoPath)
+      : videoSource;
+    const demoVideoUrl = localDemoVideoPath
+      ? getFileUrl(localDemoVideoPath)
+      : demoVideoSource;
 
     // Generate a dynamic video component with the specified values
     console.log("\nGenerating dynamic component with title:", titleText);
@@ -73,11 +238,11 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
       durationInSeconds,
       audioOffsetInSeconds,
       textPosition,
-      videoSource,
+      videoSource: mainVideoUrl,
       audioSource,
       enableAudio,
       splitScreen,
-      demoVideoSource,
+      demoVideoSource: demoVideoUrl,
       splitPosition,
     });
 
@@ -87,6 +252,14 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
     // Generate a unique filename
     const outputFilename = `video-${id}-${Date.now()}.mp4`;
     const outputPath = path.resolve(outputDir, outputFilename);
+
+    // Make sure the filename has the proper extension for the codec
+    if (outputFilename.endsWith(".m4a")) {
+      console.log(
+        "Warning: Changing output extension from .m4a to .mp4 for compatibility"
+      );
+      outputFilename = outputFilename.replace(".m4a", ".mp4");
+    }
 
     // Bundle the dynamic Remotion project
     console.log("Bundling dynamic component...\n");
@@ -103,28 +276,26 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
     // Calculate frames based on duration
     const durationInFrames = Math.floor(durationInSeconds * composition.fps);
 
-    // Render the video
+    // Render the video with increased timeout for safety
     console.log("Starting render...");
     await renderMedia({
       composition,
       serveUrl: bundled,
       codec: "h264",
       outputLocation: outputPath,
-      durationInFrames,
-      timeoutInMilliseconds: 420000, // 7 minutes overall timeout
-      delayRenderTimeoutInMilliseconds: 300000, // 5 minutes for delayRender timeouts
-
+      timeoutInMilliseconds: 900000, // 15 minutes overall timeout (increased from 7 min)
       onProgress: (progress) => {
         // Use process.stdout.write with \r to update the same line
-        if (progress.progress % 10 === 0) {
-          process.stdout.write(
-            `\rRendering progress: ${Math.floor(progress.progress * 100)}%`
-          );
-        }
+        const percent = Math.floor(progress.progress * 100);
+        const frame = progress.renderedFrames || 0;
 
-        // Add a newline when rendering is complete
-        if (progress.progress === 1) {
-          process.stdout.write("\n");
+        // process.stdout.write(
+        //   `\rRendering progress: ${percent}% (Frame ${frame})`
+        // );
+
+        // Log every 20% for debugging
+        if (percent % 20 === 0 && percent > 0 && progress.renderedFrames) {
+          process.stdout.write(`\rRendering progress: ${percent}%`);
         }
       },
     });
@@ -163,6 +334,23 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
     try {
       fs.unlinkSync(outputPath);
       console.log("Deleted local video file");
+
+      // Clean up all temporary transcoded files
+      for (const tempFile of tempFiles) {
+        try {
+          fs.unlinkSync(tempFile);
+          console.log(`Deleted temporary file: ${tempFile}`);
+        } catch (err) {
+          console.warn(`Failed to delete temporary file ${tempFile}:`, err);
+        }
+      }
+
+      // Shutdown the file server if it was created
+      if (fileServer) {
+        fileServer.close(() => {
+          console.log("File server shut down");
+        });
+      }
     } catch (err) {
       console.warn("Failed to delete local video file:", err);
     }
@@ -174,27 +362,44 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
   } catch (error) {
     console.error("Error in video generation:", error);
 
-    // Retry logic
-    if (retryCount < MAX_RETRIES) {
-      console.log(`Retry attempt ${retryCount + 1} of ${MAX_RETRIES}...`);
-      return handleVideoGeneration(id, data, retryCount + 1);
-    } else {
-      // Update the database with the error information
-      const { error: updateError } = await supabase
-        .from("generated_videos")
-        .update({
-          error: {
-            message: error.message,
-            stack: error.stack,
-            timestamp: new Date().toISOString(),
-          },
-          status: "failed",
-        })
-        .eq("id", id);
-
-      if (updateError) {
-        console.error("Failed to update error in database:", updateError);
+    // Clean up any temporary files if an error occurred
+    for (const tempFile of tempFiles) {
+      try {
+        if (fs.existsSync(tempFile)) {
+          fs.unlinkSync(tempFile);
+          console.log(`Cleaned up temporary file: ${tempFile}`);
+        }
+      } catch (err) {
+        console.warn(`Error cleaning up temporary file ${tempFile}:`, err);
       }
+    }
+
+    // Shutdown the file server if it was created
+    if (fileServer) {
+      try {
+        fileServer.close(() => {
+          console.log("File server shut down after error");
+        });
+      } catch (err) {
+        console.warn("Error shutting down file server:", err);
+      }
+    }
+
+    // Update the database with the error information
+    const { error: updateError } = await supabase
+      .from("generated_videos")
+      .update({
+        error: {
+          message: error.message,
+          stack: error.stack,
+          timestamp: new Date().toISOString(),
+        },
+        status: "failed",
+      })
+      .eq("id", id);
+
+    if (updateError) {
+      console.error("Failed to update error in database:", updateError);
     }
   }
 }
