@@ -18,7 +18,7 @@ const path = require("path");
 function generateDynamicVideo(options) {
   const {
     titleText,
-    durationInSeconds = 5,
+    durationInSeconds = 10,
     audioOffsetInSeconds = 0,
     textPosition,
     videoSource,

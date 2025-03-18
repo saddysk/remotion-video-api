@@ -4,7 +4,7 @@
   "description": "Remotion video generation API",
   "main": "index.js",
   "scripts": {
-    "start": "node api/server.js",
+    "start": "node index.js",
     "preview": "remotion preview src/index.jsx",
     "build": "remotion build src/index.jsx",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -20,8 +20,10 @@
     "@remotion/bundler": "^4.0.0",
     "@remotion/cli": "^4.0.0",
     "@remotion/renderer": "^4.0.0",
+    "@supabase/supabase-js": "^2.49.1",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "express": "^4.18.2",
     "remotion": "^4.0.0"
   }

@@ -6,6 +6,7 @@ const fs = require("fs");
 const { bundle } = require("@remotion/bundler");
 const { getCompositions, renderMedia } = require("@remotion/renderer");
 const generateDynamicVideo = require("../src/generateDynamicVideo");
+const { uploadToSupabase } = require("../libs/supabase/storage");
 
 // Create output directory if it doesn't exist
 const outputDir = path.resolve(__dirname, "../out");
@@ -141,25 +142,38 @@ app.post("/render-video", async (req, res) => {
       },
     });
 
-    // Clean up the generated files
+    // Clean up the generated component files
     try {
       fs.unlinkSync(indexPath);
       fs.unlinkSync(indexPath.replace("-index.jsx", ".jsx"));
-      console.log("Cleaned up temporary files");
-      console.log(
-        "\n-------------------------------------------\n-------------------------------------------\n"
-      );
+      console.log("Cleaned up temporary component files");
     } catch (err) {
-      console.warn("Failed to clean up temporary files:", err);
+      console.warn("Failed to clean up temporary component files:", err);
     }
 
-    // Return the URL to download the video
-    const videoUrl = `/videos/${outputFilename}`;
+    console.log("Video rendered successfully. Uploading to Supabase...");
 
+    // Upload the rendered video to Supabase storage
+    const supabaseUrl = await uploadToSupabase(outputPath, outputFilename);
+    console.log("Video uploaded to Supabase:", supabaseUrl);
+
+    // Clean up the local video file
+    try {
+      fs.unlinkSync(outputPath);
+      console.log("Deleted local video file");
+    } catch (err) {
+      console.warn("Failed to delete local video file:", err);
+    }
+
+    console.log(
+      "\n-------------------------------------------\n-------------------------------------------\n"
+    );
+
+    // Return the Supabase URL to download the video
     res.json({
       success: true,
-      message: "Video rendered successfully",
-      videoUrl,
+      message: "Video rendered and uploaded successfully",
+      videoUrl: supabaseUrl,
       usedValues: {
         titleText,
         textPosition,
@@ -171,10 +185,10 @@ app.post("/render-video", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error rendering video:", error);
+    console.error("Error rendering or uploading video:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to render video",
+      message: "Failed to process video",
       error: error.message,
       stack: error.stack,
     });
