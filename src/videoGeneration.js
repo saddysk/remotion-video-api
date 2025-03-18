@@ -115,10 +115,12 @@ async function handleVideoGeneration(id, data, outputDir, retryCount = 0) {
       delayRenderTimeoutInMilliseconds: 300000, // 5 minutes for delayRender timeouts
 
       onProgress: (progress) => {
-        // // Use process.stdout.write with \r to update the same line
-        // process.stdout.write(
-        //   `\rRendering progress: ${Math.floor(progress.progress * 100)}%`
-        // );
+        // Use process.stdout.write with \r to update the same line
+        if (progress.progress % 10 === 0) {
+          process.stdout.write(
+            `\rRendering progress: ${Math.floor(progress.progress * 100)}%`
+          );
+        }
 
         // Add a newline when rendering is complete
         if (progress.progress === 1) {
