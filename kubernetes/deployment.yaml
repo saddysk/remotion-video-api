@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remotion-video-generator
+  labels:
+    app: remotion-video-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: remotion-video-generator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: remotion-video-generator
+    spec:
+      containers:
+        - name: remotion-video-generator
+          image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+          ports:
+            - containerPort: 3000
+          env:
+            - name: SUPABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: remotion-secrets
+                  key: supabase-url
+            - name: SUPABASE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: remotion-secrets
+                  key: supabase-key
+            - name: SUPABASE_STORAGE_BUCKET
+              value: "generated-videos"
+            - name: NODE_ENV
+              value: "production"
+            - name: RENDER_CONCURRENCY
+              value: "2"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          volumeMounts:
+            - name: temp-storage
+              mountPath: /app/out
+      volumes:
+        - name: temp-storage
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
