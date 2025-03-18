@@ -198,19 +198,19 @@ const server = app.listen(port, async () => {
     // Initialize Supabase real-time subscription
     const subscription = await setupRealTimeSubscription();
 
-    // // Setup graceful shutdown for normal process termination
-    // process.on("SIGINT", async () => {
-    //   console.log("Server shutdown initiated...");
+    // Setup graceful shutdown for normal process termination
+    process.on("SIGINT", async () => {
+      console.log("Server shutdown initiated...");
 
-    //   // Close subscription
-    //   await subscription.unsubscribe();
+      // Close subscription
+      await subscription.unsubscribe();
 
-    //   // Close server
-    //   server.close(() => {
-    //     console.log("Server closed");
-    //     process.exit(0);
-    //   });
-    // });
+      // Close server
+      server.close(() => {
+        console.log("Server closed");
+        process.exit(0);
+      });
+    });
 
     console.log("Service started successfully!");
   } catch (error) {
