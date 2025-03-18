@@ -5,9 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "build": "npm install && mkdir -p dist && cp -r node_modules package.json index.js .env* dist/ || true",
-    "serve": "node dist/index.js",
+    "build": "remotion build src/index.jsx",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -27,11 +25,5 @@
     "dotenv": "^16.4.7",
     "express": "^4.18.2",
     "remotion": "^4.0.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
