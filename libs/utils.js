@@ -1,9 +1,18 @@
+const util = require("util");
+const { exec } = require("child_process");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+const ffmpeg = require("fluent-ffmpeg");
+
+// Set ffmpeg path for local operations
+ffmpeg.setFfmpegPath(ffmpegPath);
+const execPromise = util.promisify(exec);
+
 /**
  * Gets the duration of a video file using ffprobe
  * @param {string} videoUrl URL of the video
  * @returns {Promise<number>} Duration in seconds or null if it cannot be determined
  */
-async function getVideoDuration(videoUrl, execPromise) {
+async function getVideoDuration(videoUrl) {
   if (!videoUrl) return null;
 
   try {

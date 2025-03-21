@@ -5,93 +5,9 @@ const { getCompositions, renderMedia } = require("@remotion/renderer");
 const generateDynamicVideo = require("./generateDynamicVideo");
 const { uploadToSupabase } = require("../libs/supabase/storage");
 const supabase = require("../config/supabase.config");
-const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-const ffmpeg = require("fluent-ffmpeg");
-const util = require("util");
-const { exec } = require("child_process");
 const getVideoDuration = require("../libs/utils");
-const { getFileUrl } = require("./fileServer");
-
-// Set ffmpeg path
-ffmpeg.setFfmpegPath(ffmpegPath);
-const execPromise = util.promisify(exec);
-
-/**
- * Ensures video is using a compatible codec (H.264) for Remotion
- * @param {string} videoUrl URL of the video to check/transcode
- * @param {string} outputDir Directory to save transcoded file
- * @param {string} id Unique identifier for the file
- * @returns {Promise<string>} Path to the compatible video file
- */
-async function ensureCompatibleCodec(videoUrl, outputDir, id) {
-  if (!videoUrl) return null;
-
-  console.log(`Checking codec compatibility for: ${videoUrl}`);
-
-  try {
-    // Try to detect source video codec using ffprobe
-    let needsTranscode = false;
-
-    try {
-      const ffprobeCommand = `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${videoUrl}"`;
-      const { stdout } = await execPromise(ffprobeCommand);
-
-      const detectedCodec = stdout.trim().toLowerCase();
-      console.log(`Detected source codec: ${detectedCodec}`);
-
-      // Check if transcoding is needed
-      if (detectedCodec === "hevc" || detectedCodec === "h265") {
-        needsTranscode = true;
-        console.log("HEVC/H.265 codec detected, transcoding required");
-      }
-    } catch (err) {
-      console.warn(
-        "Could not detect video codec, will transcode to be safe:",
-        err.message
-      );
-      needsTranscode = true;
-    }
-
-    // If transcoding is not needed, return original URL
-    if (!needsTranscode) {
-      console.log("Video already uses compatible codec, no transcoding needed");
-      return videoUrl;
-    }
-
-    // Transcode to H.264
-    const tempFile = path.join(outputDir, `temp-h264-${id}-${Date.now()}.mp4`);
-    console.log(`Transcoding to H.264: ${tempFile}`);
-
-    return new Promise((resolve, reject) => {
-      ffmpeg(videoUrl)
-        .outputOptions([
-          "-c:v libx264", // Use H.264 codec
-          "-crf 23", // Reasonable quality
-          "-preset fast", // Fast encoding speed
-          "-c:a aac", // AAC audio codec
-          "-strict experimental",
-        ])
-        .output(tempFile)
-        .on("progress", (progress) => {
-          // console.log(
-          //   `Transcoding progress: ${Math.round(progress.percent || 0)}%`
-          // );
-        })
-        .on("end", () => {
-          console.log("Transcoding completed successfully");
-          resolve(tempFile);
-        })
-        .on("error", (err) => {
-          console.error("Transcoding error:", err);
-          reject(err);
-        })
-        .run();
-    });
-  } catch (error) {
-    console.error("Error in codec compatibility check:", error);
-    return videoUrl; // Fall back to original URL if anything fails
-  }
-}
+const { ensureCompatibleCodec } = require("./transcoder");
+const { s3, BUCKET_NAME } = require("../config/aws.config");
 
 /**
  * Main function to handle video generation triggered by Supabase
@@ -99,12 +15,14 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
  * @param {Object} data The data from the generated_videos record
  * @param {string} outputDir Directory to save output files
  */
-async function handleVideoGeneration(id, data, outputDir) {
+async function videoGeneration(id, data, outputDir) {
   console.log(`Processing video generation for ID: ${id}`);
-  // console.log(`Data received:`, JSON.stringify(data));
 
-  // Track temporary files to clean up later
-  const tempFiles = [];
+  // Track S3 keys to clean up later
+  const s3FilesToCleanup = [];
+
+  // Track temporary local files to clean up
+  const tempLocalFiles = [];
 
   try {
     // Extract properties from data and remotion JSONB field
@@ -176,20 +94,27 @@ async function handleVideoGeneration(id, data, outputDir) {
     console.log("\nEnsuring video codec compatibility...");
 
     // Process main video
-    let localMainVideoPath = null;
     const processedVideoSource = await ensureCompatibleCodec(
       videoSource,
       outputDir,
       `${id}-main`
     );
+
+    // If we got back an S3 URL, add it to cleanup list
     if (processedVideoSource !== videoSource && processedVideoSource !== null) {
       console.log(`Main video transcoded to: ${processedVideoSource}`);
-      localMainVideoPath = processedVideoSource;
-      tempFiles.push(processedVideoSource);
+      if (processedVideoSource.includes(BUCKET_NAME)) {
+        // Extract the S3 key from the URL
+        const s3Key = processedVideoSource.split(
+          `${BUCKET_NAME}.s3.amazonaws.com/`
+        )[1];
+        if (s3Key) {
+          s3FilesToCleanup.push(s3Key);
+        }
+      }
     }
 
     // Process demo video if needed
-    let localDemoVideoPath = null;
     let processedDemoSource = null;
     if ((splitScreen || sequentialMode) && demoVideoSource) {
       processedDemoSource = await ensureCompatibleCodec(
@@ -197,28 +122,32 @@ async function handleVideoGeneration(id, data, outputDir) {
         outputDir,
         `${id}-demo`
       );
+
+      // If we got back an S3 URL, add it to cleanup list
       if (
         processedDemoSource !== demoVideoSource &&
         processedDemoSource !== null
       ) {
         console.log(`Demo video transcoded to: ${processedDemoSource}`);
-        localDemoVideoPath = processedDemoSource;
-        tempFiles.push(processedDemoSource);
+        if (processedDemoSource.includes(BUCKET_NAME)) {
+          // Extract the S3 key from the URL
+          const s3Key = processedDemoSource.split(
+            `${BUCKET_NAME}.s3.amazonaws.com/`
+          )[1];
+          if (s3Key) {
+            s3FilesToCleanup.push(s3Key);
+          }
+        }
       }
     }
 
-    // Get proper URLs for videos using the shared file server
-    const mainVideoUrl = localMainVideoPath
-      ? getFileUrl(localMainVideoPath)
-      : videoSource;
-    const demoVideoUrl = localDemoVideoPath
-      ? getFileUrl(localDemoVideoPath)
-      : demoVideoSource;
-
     // Determine video durations
     console.log("\nDetecting video durations...");
-    const mainVideoDuration = await getVideoDuration(mainVideoUrl, execPromise);
-    const demoVideoDuration = await getVideoDuration(demoVideoUrl, execPromise);
+    const mainVideoUrl = processedVideoSource || videoSource;
+    const demoVideoUrl = processedDemoSource || demoVideoSource;
+
+    const mainVideoDuration = await getVideoDuration(mainVideoUrl);
+    const demoVideoDuration = await getVideoDuration(demoVideoUrl);
 
     console.log(
       `Main video: ${mainVideoDuration || "unknown"} secs, Demo video: ${
@@ -273,19 +202,25 @@ async function handleVideoGeneration(id, data, outputDir) {
       firstVideoDuration,
     });
 
+    // Add temporary component files to cleanup list
+    tempLocalFiles.push(indexPath);
+    tempLocalFiles.push(indexPath.replace("-index.jsx", ".jsx"));
+
     console.log("Generated dynamic component:", componentName);
     console.log("Dynamic index path:", indexPath);
 
     // Generate a unique filename
     const outputFilename = `video-${id}-${Date.now()}.mp4`;
     const outputPath = path.resolve(outputDir, outputFilename);
+    tempLocalFiles.push(outputPath);
 
     // Make sure the filename has the proper extension for the codec
+    let finalOutputFilename = outputFilename;
     if (outputFilename.endsWith(".m4a")) {
       console.log(
         "Warning: Changing output extension from .m4a to .mp4 for compatibility"
       );
-      outputFilename = outputFilename.replace(".m4a", ".mp4");
+      finalOutputFilename = outputFilename.replace(".m4a", ".mp4");
     }
 
     // Bundle the dynamic Remotion project
@@ -307,7 +242,7 @@ async function handleVideoGeneration(id, data, outputDir) {
       serveUrl: bundled,
       codec: "h264",
       outputLocation: outputPath,
-      timeoutInMilliseconds: 900000, // 15 minutes overall timeout (increased from 7 min)
+      timeoutInMilliseconds: 900000, // 15 minutes overall timeout
       onProgress: (progress) => {
         // Use process.stdout.write with \r to update the same line
         const percent = Math.floor(progress.progress * 100);
@@ -323,19 +258,10 @@ async function handleVideoGeneration(id, data, outputDir) {
       },
     });
 
-    // Clean up the generated component files
-    try {
-      fs.unlinkSync(indexPath);
-      fs.unlinkSync(indexPath.replace("-index.jsx", ".jsx"));
-      console.log("\nCleaned up temporary component files");
-    } catch (err) {
-      console.warn("Failed to clean up temporary component files:", err);
-    }
-
-    console.log("Video rendered successfully. Uploading to Supabase...");
+    console.log("\nVideo rendered successfully. Uploading to Supabase...");
 
     // Upload the rendered video to Supabase storage
-    const supabaseUrl = await uploadToSupabase(outputPath, outputFilename);
+    const supabaseUrl = await uploadToSupabase(outputPath, finalOutputFilename);
     console.log("Video uploaded to Supabase:", supabaseUrl);
 
     // Update the remotion_video field in the database
@@ -353,22 +279,50 @@ async function handleVideoGeneration(id, data, outputDir) {
       throw new Error(`Failed to update database: ${updateError.message}`);
     }
 
-    // Clean up the local video file
-    try {
-      fs.unlinkSync(outputPath);
-      console.log("Deleted local video file");
+    // Clean up all files
+    console.log("Cleaning up resources...");
 
-      // Clean up all temporary transcoded files
-      for (const tempFile of tempFiles) {
-        try {
-          fs.unlinkSync(tempFile);
-          console.log(`Deleted temporary file: ${tempFile}`);
-        } catch (err) {
-          console.warn(`Failed to delete temporary file ${tempFile}:`, err);
+    // 1. Clean up local temporary files
+    for (const filePath of tempLocalFiles) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`Deleted local file: ${filePath}`);
         }
+      } catch (err) {
+        console.warn(`Failed to delete local file ${filePath}:`, err);
       }
-    } catch (err) {
-      console.warn("Failed to delete local video file:", err);
+    }
+
+    // 2. Clean up S3 files from transcoding
+    if (s3FilesToCleanup.length > 0) {
+      console.log(`Cleaning up ${s3FilesToCleanup.length} files from S3`);
+
+      try {
+        const deleteParams = {
+          Bucket: BUCKET_NAME,
+          Delete: {
+            Objects: s3FilesToCleanup.map((key) => ({ Key: key })),
+            Quiet: false,
+          },
+        };
+
+        const deleteResult = await s3.deleteObjects(deleteParams).promise();
+        console.log(
+          `Successfully deleted ${
+            deleteResult.Deleted?.length || 0
+          } files from S3`
+        );
+
+        if (deleteResult.Errors && deleteResult.Errors.length > 0) {
+          console.warn(
+            `Failed to delete ${deleteResult.Errors.length} files from S3:`,
+            deleteResult.Errors
+          );
+        }
+      } catch (err) {
+        console.warn("Error deleting files from S3:", err);
+      }
     }
 
     console.log("Video generation and upload completed successfully!");
@@ -378,15 +332,36 @@ async function handleVideoGeneration(id, data, outputDir) {
   } catch (error) {
     console.error("Error in video generation:", error);
 
-    // Clean up any temporary files if an error occurred
-    for (const tempFile of tempFiles) {
+    // Clean up any local temporary files if an error occurred
+    for (const filePath of tempLocalFiles) {
       try {
-        if (fs.existsSync(tempFile)) {
-          fs.unlinkSync(tempFile);
-          console.log(`Cleaned up temporary file: ${tempFile}`);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`Cleaned up temporary file: ${filePath}`);
         }
       } catch (err) {
-        console.warn(`Error cleaning up temporary file ${tempFile}:`, err);
+        console.warn(`Error cleaning up temporary file ${filePath}:`, err);
+      }
+    }
+
+    // Clean up S3 files even on error
+    if (s3FilesToCleanup.length > 0) {
+      console.log(
+        `Cleaning up ${s3FilesToCleanup.length} files from S3 after error`
+      );
+
+      try {
+        const deleteParams = {
+          Bucket: BUCKET_NAME,
+          Delete: {
+            Objects: s3FilesToCleanup.map((key) => ({ Key: key })),
+            Quiet: false,
+          },
+        };
+
+        await s3.deleteObjects(deleteParams).promise();
+      } catch (err) {
+        console.warn("Error deleting files from S3 after error:", err);
       }
     }
 
@@ -409,4 +384,4 @@ async function handleVideoGeneration(id, data, outputDir) {
   }
 }
 
-module.exports = handleVideoGeneration;
+module.exports = videoGeneration;
