@@ -93,25 +93,25 @@ async function videoGeneration(id, data, outputDir) {
     // Process video sources to ensure codec compatibility
     console.log("\nEnsuring video codec compatibility...");
 
-    // // Process main video
-    // const processedVideoSource = await ensureCompatibleCodec(
-    //   videoSource,
-    //   `${id}-main`
-    // );
+    // Process main video
+    const processedVideoSource = await ensureCompatibleCodec(
+      videoSource,
+      `${id}-main`
+    );
 
-    // // If we got back an S3 URL, add it to cleanup list
-    // if (processedVideoSource !== videoSource && processedVideoSource !== null) {
-    //   console.log(`Main video transcoded to: ${processedVideoSource}`);
-    //   if (processedVideoSource.includes(BUCKET_NAME)) {
-    //     // Extract the S3 key from the URL
-    //     const s3Key = processedVideoSource.split(
-    //       `${BUCKET_NAME}.s3.amazonaws.com/`
-    //     )[1];
-    //     if (s3Key) {
-    //       s3FilesToCleanup.push(s3Key);
-    //     }
-    //   }
-    // }
+    // If we got back an S3 URL, add it to cleanup list
+    if (processedVideoSource !== videoSource && processedVideoSource !== null) {
+      console.log(`Template video transcoded to: ${processedVideoSource}`);
+      if (processedVideoSource.includes(BUCKET_NAME)) {
+        // Extract the S3 key from the URL
+        const s3Key = processedVideoSource.split(
+          `${BUCKET_NAME}.s3.amazonaws.com/`
+        )[1];
+        if (s3Key) {
+          s3FilesToCleanup.push(s3Key);
+        }
+      }
+    }
 
     // Process demo video if needed
     let processedDemoSource = null;
@@ -141,8 +141,7 @@ async function videoGeneration(id, data, outputDir) {
 
     // Determine video durations
     console.log("\nDetecting video durations...");
-    // const mainVideoUrl = processedVideoSource || videoSource;
-    const mainVideoUrl = videoSource;
+    const mainVideoUrl = processedVideoSource || videoSource;
     const demoVideoUrl = processedDemoSource || demoVideoSource;
 
     const mainVideoDuration = await getVideoDuration(mainVideoUrl);
