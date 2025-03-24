@@ -24,7 +24,7 @@ app.use("/videos", express.static(outputDir));
 app.use("/public", express.static(path.join(__dirname, "./public")));
 
 // Configuration for video rendering
-const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || "2"); // How many videos to render simultaneously
+const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || "5"); // How many videos to render simultaneously
 
 // Job queue for handling concurrent renders
 class RenderQueue {

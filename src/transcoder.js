@@ -20,11 +20,10 @@ const execPromise = util.promisify(exec);
 /**
  * Ensures video is using a compatible codec (H.264) for Remotion
  * @param {string} videoUrl URL of the video to check/transcode
- * @param {string} outputDir Directory to save transcoded file
  * @param {string} id Unique identifier for the file
  * @returns {Promise<string>} Path to the compatible video file
  */
-async function ensureCompatibleCodec(videoUrl, outputDir, id) {
+async function ensureCompatibleCodec(videoUrl, id) {
   if (!videoUrl) return null;
 
   console.log(`Checking codec compatibility for: ${videoUrl}`);
