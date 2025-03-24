@@ -149,19 +149,19 @@ async function videoGeneration(id, data, outputDir) {
     const demoVideoDuration = await getVideoDuration(demoVideoUrl);
 
     console.log(
-      `Main video: ${mainVideoDuration || "unknown"} secs, Demo video: ${
+      `Template video: ${mainVideoDuration || "unknown"} secs, Demo video: ${
         demoVideoDuration || "unknown"
       } secs`
     );
 
     // Apply the dynamic duration logic based on the requirements
     if (mainVideoDuration !== null) {
-      // Case 4: If no demo video, use main video duration
+      // Case 4: If no demo video, use template video duration
       if (demoVideoSource === null) {
         durationInSeconds = mainVideoDuration;
       }
 
-      // Case 3: In sequential mode, firstVideoDuration = main video duration
+      // Case 3: In sequential mode, firstVideoDuration = template video duration
       if (sequentialMode) {
         firstVideoDuration = mainVideoDuration;
       }
