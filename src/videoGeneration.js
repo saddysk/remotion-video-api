@@ -8,6 +8,17 @@ const supabase = require("../config/supabase.config");
 const getVideoDuration = require("../libs/utils");
 const { ensureCompatibleCodec } = require("./transcoder");
 const { s3, BUCKET_NAME } = require("../config/aws.config");
+const os = require("os");
+
+// Modify the tempLocalFiles cleanup to ensure proper /tmp usage
+// Instead of using the outputDir directly, use a subdirectory in /tmp
+const getTempDir = () => {
+  const dir = path.join(os.tmpdir(), `remotion-${Date.now()}`);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+};
 
 /**
  * Main function to handle video generation triggered by Supabase
@@ -209,8 +220,11 @@ async function videoGeneration(id, data, outputDir) {
 
     // Generate a unique filename
     const outputFilename = `video-${id}-${Date.now()}.mp4`;
-    const outputPath = path.resolve(outputDir, outputFilename);
-    tempLocalFiles.push(outputPath);
+    // const outputPath = path.resolve(outputDir, outputFilename);
+    const tempDir = getTempDir();
+    const outputPath = path.resolve(tempDir, outputFilename);
+    tempLocalFiles.push(tempDir); // We'll recursively delete this late
+    // tempLocalFiles.push(outputPath);
 
     // Make sure the filename has the proper extension for the codec
     let finalOutputFilename = outputFilename;
