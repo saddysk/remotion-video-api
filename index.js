@@ -5,11 +5,7 @@ const fs = require("fs");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const supabase = require("./config/supabase.config");
-const handleVideoGeneration = require("./src/videoGeneration");
-const {
-  initializeFileServer,
-  shutdownFileServer,
-} = require("./src/fileServer");
+const videoGeneration = require("./src/videoGeneration");
 
 // Create output directory if it doesn't exist
 const outputDir = path.resolve(__dirname, "./out");
@@ -28,7 +24,7 @@ app.use("/videos", express.static(outputDir));
 app.use("/public", express.static(path.join(__dirname, "./public")));
 
 // Configuration for video rendering
-const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || "2"); // How many videos to render simultaneously
+const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || "5"); // How many videos to render simultaneously
 
 // Job queue for handling concurrent renders
 class RenderQueue {
@@ -54,7 +50,7 @@ class RenderQueue {
     this.running++;
 
     try {
-      await handleVideoGeneration(job.id, job.data, outputDir);
+      await videoGeneration(job.id, job.data, outputDir);
       job.resolve();
     } catch (error) {
       job.reject(error);
@@ -199,9 +195,6 @@ const server = app.listen(port, async () => {
   console.log(`Server running at http://localhost:${port}`);
 
   try {
-    // Initialize file server at startup
-    initializeFileServer(outputDir);
-
     // Initialize Supabase real-time subscription
     const subscription = await setupRealTimeSubscription();
 
@@ -212,9 +205,6 @@ const server = app.listen(port, async () => {
       // Close subscription
       await subscription.unsubscribe();
 
-      // Shutdown file server
-      await shutdownFileServer();
-
       // Close server
       server.close(() => {
         console.log("Server closed");
@@ -224,7 +214,6 @@ const server = app.listen(port, async () => {
 
     console.log("Service started successfully!");
   } catch (error) {
-    console.error("Failed to initialize services:", error);
-    console.log("Server is running but some initializations failed.");
+    console.error("Failed to initialize server:", error);
   }
 });
